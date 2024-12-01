@@ -1,0 +1,24 @@
+<!-- monitor/templates/monitor/index.html -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>eBPF Packet Monitor</title>
+    <link rel="stylesheet" type="text/css" href="{% load static %}">
+</head>
+<body>
+    <h1>Packet Counts</h1>
+    <table>
+        <tr>
+            <th>Timestamp</th>
+            <th>Packet Count</th>
+        </tr>
+        {% for entry in data %}
+        <tr>
+            <td>{{ entry.timestamp }}</td>
+            <td>{{ entry.count }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
