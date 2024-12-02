@@ -75,6 +75,13 @@ int count_tcp_packets(struct xdp_md *ctx) {
                           ((tcp->rst & 0x1) << 2) | ((tcp->psh & 0x1) << 3) |
                           ((tcp->ack & 0x1) << 4) | ((tcp->urg & 0x1) << 5));
 
+        // **ACK Packet Filtering**
+        // Skip pure ACK packets (no SYN, FIN, PSH, RST, URG flags set)
+        if (tcp->ack == 1 && tcp->syn == 0 && tcp->fin == 0 &&
+            tcp->psh == 0 && tcp->rst == 0 && tcp->urg == 0) {
+            return XDP_PASS;
+        }
+
         // Increment packet count for source IP
         __u64 *value = packet_count.lookup(&info.src_ip);
         if (value) {
@@ -87,7 +94,7 @@ int count_tcp_packets(struct xdp_md *ctx) {
         // Sampling: Use per-CPU counter for consistency
         __u32 index = 0; // Index for the single entry in sample_counter
         __u64 *counter = sample_counter.lookup(&index);
-        if (counter && ++(*counter) % 10 == 0) {
+        if (counter && ++(*counter) % 1 == 0) {
             // Log the first part of the TCP packet details
             bpf_trace_printk("TCP Packet: src_ip=%x, dst_ip=%x\n", info.src_ip, info.dst_ip);
 
