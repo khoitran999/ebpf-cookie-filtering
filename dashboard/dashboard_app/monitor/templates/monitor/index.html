@@ -20,5 +20,28 @@
         </tr>
         {% endfor %}
     </table>
+    <h1>Packet Details</h1>
+    <table>
+        <tr>
+            <th>Timestamp</th>
+            <th>Source IP</th>
+            <th>Destination IP</th>
+            <th>Protocol</th>
+            <th>Length</th>
+        </tr>
+        {% for entry in packets %}
+        <tr>
+            <td>{{ entry.timestamp }}</td>
+            <td>{{ entry.src_ip }}</td>
+            <td>{{ entry.dst_ip }}</td>
+            <td>{{ entry.protocol }}</td>
+            <td>{{ entry.length }}</td>
+        </tr>
+        {% endfor %}
+    <script>
+        setTimeout(function() {
+            window.location.reload();
+        }, 1000);
+    </script>
 </body>
 </html>

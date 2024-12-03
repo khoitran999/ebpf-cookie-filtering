@@ -22,6 +22,7 @@ class PacketAnalyzer:
         self.packet_count_map = None
         self.local_packet_cache = {}  # Local cache for cumulative counts
         self.total_packet_count = 0
+        self.captured_packets = []
 
         # struct packet_info {
         #     __u32 src_ip;     // Source IP address
@@ -78,13 +79,14 @@ class PacketAnalyzer:
         fn = self.bpf.load_func(function_name, BPF.XDP)
         self.bpf.attach_xdp(self.interface, fn, 0)
         self.packet_count_map = self.bpf.get_table("packet_count")
-        logging.info(f"Packet_count map: {self.packet_count_map.items()}")
+
 
         # Set up perf buffer callback
         def print_packet_event(cpu, data, size):
             try:
                 # Parse packet event
                 event = ctypes.cast(data, ctypes.POINTER(self.PacketInfo)).contents
+
 
                 # Convert IP addresses to human-readable format
                 src_ip = socket.inet_ntoa(struct.pack("!I", event.src_ip))
@@ -110,6 +112,20 @@ class PacketAnalyzer:
 
                 # Increment total packet count
                 self.total_packet_count += 1
+                # Store the packet in the captured packets list
+                packet_dict = {
+                    "protocol": protocol_name,
+                    "src_ip": src_ip,
+                    "dst_ip": dst_ip,
+                    "src_port": event.src_port,
+                    "dst_port": event.dst_port,
+                    "packet_len": event.packet_len,
+                    "seq_num": event.seq_num,
+                    "ack_num": event.ack_num,
+                    "tcp_flags": event.tcp_flags,
+                    "packet_type": protocol_name[event.packet_type]
+                }
+                self.captured_packets.append(packet_dict)
             except Exception as e:
                 logging.error(f"Error processing packet event: {e}")
 
@@ -154,6 +170,7 @@ def main():
     analyzer.attach()
     api_url = config["dashboard_api_url"]
 
+
     logging.info("Starting packet analyzer daemon. Press Ctrl+C to stop.")
 
     try:
@@ -172,7 +189,10 @@ def main():
                 formatted_count = helpers.format_packet_count(total_packets)
                 logging.info(f"Total Packets: {formatted_count}")
 
-                data = {"count": total_packets}
+                data = {
+                    "count": total_packets,
+                    "packets": analyzer.captured_packets
+                    }
                 try:
                     response = requests.post(api_url, json=data)
                     if response.status_code != 201:
