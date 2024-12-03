@@ -1,0 +1,182 @@
+# ============================
+# Operating System Files
+# ============================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================
+# Python
+# ============================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+.env/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# ============================
+# eBPF and C/C++ Build Artifacts
+# ============================
+
+# Compiled object files
+*.o
+*.obj
+
+# Compiled shared libraries
+*.so
+*.dll
+*.dylib
+
+# eBPF object files
+*.elf
+*.o
+
+# Build directories
+build/
+bin/
+out/
+
+# Makefile artifacts
+*.d
+*.dep
+
+# ============================
+# Logs and Databases
+# ============================
+
+# Log files
+*.log
+
+# Database files
+*.db
+*.sqlite3
+
+# ============================
+# Environment Variables
+# ============================
+
+# dotenv environment variables file
+.env
+
+# ============================
+# Miscellaneous
+# ============================
+
+# Backup files
+*.bak
+*.tmp
+*.swp
+
+# Git directories
+.git/
+
+
+# ============================
+# Custom Project-Specific Exclusions
+# ============================
+
+# eBPF module compiled files
+ebpf_module/src/*.o
+ebpf_module/src/*.elf
+
+# User daemon compiled files
+user_daemon/*.o
+user_daemon/*.elf
+
+# ============================
+# Sensitive Configuration Files
+# ============================
+
+# Uncomment if config.yaml contains sensitive information
+config.yaml
+
+# ============================
+# Ignore All Other Untracked Files
+# ============================
+
+# Add any other files or directories you want to exclude below
