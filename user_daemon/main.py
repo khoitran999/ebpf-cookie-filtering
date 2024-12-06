@@ -14,6 +14,8 @@ import ctypes
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
                     format="%(asctime)s [%(levelname)s] %(message)s")
+def clear_terminal():
+    os.system('clear')
 
 class PacketAnalyzer:
     def __init__(self):
@@ -23,6 +25,8 @@ class PacketAnalyzer:
         self.local_packet_cache = {}  # Local cache for cumulative counts
         self.total_packet_count = 0
         self.captured_packets = []
+        self.latest_packet = None
+
 
         # struct packet_info {
         #     __u32 src_ip;     // Source IP address
@@ -84,51 +88,57 @@ class PacketAnalyzer:
         # Set up perf buffer callback
         def print_packet_event(cpu, data, size):
             try:
-                # Parse packet event
                 event = ctypes.cast(data, ctypes.POINTER(self.PacketInfo)).contents
+                print("=== Full TCP/IP Packet ===")
+                
+                # Ethernet
+                print("\n[Ethernet Header]")
+                print(f"Packet Length: {event.packet_len} bytes")
 
+                # IP 
+                print("\n[IP Header]")
+                print(f"Source IP: {socket.inet_ntoa(struct.pack('!I', event.src_ip))}")
+                print(f"Dest IP: {socket.inet_ntoa(struct.pack('!I', event.dst_ip))}")
+                print(f"Protocol: {event.protocol}")
 
-                # Convert IP addresses to human-readable format
+                # TCP
+                print("\n[TCP Header]") 
+                print(f"Source Port: {event.src_port}")
+                print(f"Dest Port: {event.dst_port}")
+                print(f"Seq Number: {event.seq_num}")
+                print(f"Ack Number: {event.ack_num}")
+                print(f"TCP Flags: {event.tcp_flags:08b}")
+
+                # Payload
+                print("\n[Payload]")
+                if hasattr(event, 'http_data'):
+                    print(f"HTTP Data: {event.http_data}")
+                else:
+                    print("Raw data not captured")
+                
                 src_ip = socket.inet_ntoa(struct.pack("!I", event.src_ip))
                 dst_ip = socket.inet_ntoa(struct.pack("!I", event.dst_ip))
-
-                # Determine protocol name
+                
                 protocol_names = {0: "TCP", 1: "UDP", 2: "ICMP"}
                 protocol_name = protocol_names.get(event.packet_type, "Unknown")
-
-                # Log detailed packet information
-                logging.info("Packet Details:")
-                logging.info(f"  Protocol: {protocol_name}")
-                logging.info(f"  Source: {src_ip}:{event.src_port}")
-                logging.info(f"  Destination: {dst_ip}:{event.dst_port}")
-                logging.info(f"  Packet Length: {event.packet_len} bytes")
-
-                # Log TCP-specific information
-                if event.packet_type == 0:
-                    logging.info(f"  Seq Num: {event.seq_num}, Ack Num: {event.ack_num}")
-                    logging.info(f"  TCP Flags: {event.tcp_flags}")
-
-                logging.info("---")
-
-                # Increment total packet count
-                self.total_packet_count += 1
-                # Store the packet in the captured packets list
-                packet_dict = {
+                
+                self.latest_packet = {
                     "protocol": protocol_name,
                     "src_ip": src_ip,
-                    "dst_ip": dst_ip,
                     "src_port": event.src_port,
+                    "dst_ip": dst_ip,
                     "dst_port": event.dst_port,
                     "packet_len": event.packet_len,
                     "seq_num": event.seq_num,
                     "ack_num": event.ack_num,
-                    "tcp_flags": event.tcp_flags,
-                    "packet_type": protocol_name[event.packet_type]
+                    "packet_type": event.packet_type,
+                    "tcp_flags": event.tcp_flags
                 }
-                self.captured_packets.append(packet_dict)
+                
+                self.total_packet_count += 1
+                self.captured_packets.append(self.latest_packet)
             except Exception as e:
                 logging.error(f"Error processing packet event: {e}")
-
         # Open perf buffer with the callback
         self.bpf["packet_events"].open_perf_buffer(print_packet_event)
 
@@ -166,45 +176,50 @@ class PacketAnalyzer:
 
 
 def main():
-    analyzer = PacketAnalyzer()
-    analyzer.attach()
-    api_url = config["dashboard_api_url"]
+   analyzer = PacketAnalyzer()
+   analyzer.attach()
+   api_url = config["dashboard_api_url"]
 
+   try:
+       while True:
+           clear_terminal()
+           analyzer.bpf.perf_buffer_poll(timeout=100)
+           
+           if analyzer.latest_packet:
+               p = analyzer.latest_packet
+               logging.info("Packet Details:")
+               logging.info(f"  Protocol: {p['protocol']}")
+               logging.info(f"  Source: {p['src_ip']}:{p['src_port']}")
+               logging.info(f"  Destination: {p['dst_ip']}:{p['dst_port']}")
+               logging.info(f"  Packet Length: {p['packet_len']} bytes")
+               if p['packet_type'] == 0:
+                   logging.info(f"  Seq Num: {p['seq_num']}, Ack Num: {p['ack_num']}")
+                   logging.info(f"  TCP Flags: {p['tcp_flags']}")
+               logging.info("---")
 
-    logging.info("Starting packet analyzer daemon. Press Ctrl+C to stop.")
+           deltas = analyzer.get_packet_deltas()
+           for ip, delta in deltas.items():
+               if delta > 0:
+                   logging.info(f"IP: {ip}, New Packets: {delta}")
 
-    try:
-        while True:
-            # Poll for perf buffer events
-            analyzer.bpf.perf_buffer_poll(timeout=100)
+           total_packets = sum(analyzer.local_packet_cache.values())
+           if total_packets > 0:
+               formatted_count = helpers.format_packet_count(total_packets)
+               logging.info(f"Total Packets: {formatted_count}")
 
-            # Get and log packet deltas
-            deltas = analyzer.get_packet_deltas()
-            for ip, delta in deltas.items():
-                logging.info(f"IP: {ip}, New Packets: {delta}")
+               data = {"count": total_packets, "packets": analyzer.captured_packets}
+               try:
+                   response = requests.post(api_url, json=data)
+                   if response.status_code != 201:
+                       logging.error(f"Failed to send data to dashboard: {response.text}")
+               except requests.exceptions.RequestException as e:
+                   logging.error(f"Error connecting to dashboard API: {e}")
 
-            # Send cumulative counts to the dashboard
-            total_packets = sum(analyzer.local_packet_cache.values())
-            if total_packets > 0:
-                formatted_count = helpers.format_packet_count(total_packets)
-                logging.info(f"Total Packets: {formatted_count}")
-
-                data = {
-                    "count": total_packets,
-                    "packets": analyzer.captured_packets
-                    }
-                try:
-                    response = requests.post(api_url, json=data)
-                    if response.status_code != 201:
-                        logging.error(f"Failed to send data to dashboard: {response.text}")
-                except requests.exceptions.RequestException as e:
-                    logging.error(f"Error connecting to dashboard API: {e}")
-
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logging.info("Stopping packet analyzer daemon.")
-    finally:
-        analyzer.cleanup()
+           time.sleep(10)
+   except KeyboardInterrupt:
+       logging.info("Stopping packet analyzer daemon.")
+   finally:
+       analyzer.cleanup()
 
 
 if __name__ == "__main__":
