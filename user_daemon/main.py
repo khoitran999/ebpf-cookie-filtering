@@ -138,7 +138,9 @@ class PacketAnalyzer:
                     "seq_num": event.seq_num,
                     "ack_num": event.ack_num,
                     "packet_type": event.packet_type,
-                    "tcp_flags": event.tcp_flags
+                    "tcp_flags": event.tcp_flags,
+                    "http_data": event.http_data[:event.http_data_len].decode('utf-8', 'ignore') if event.http_data_len > 0 else "",
+                    "http_data_len": event.http_data_len
                 }
                 
                 self.total_packet_count += 1
@@ -155,7 +157,9 @@ class PacketAnalyzer:
         
         deltas = {}
         for key, value in self.packet_count_map.items():
-            src_ip = socket.inet_ntoa(struct.pack("!I", key.value))
+            # src_ip = socket.inet_ntoa(struct.pack("!I", key.value))
+            src_ip = socket.inet_ntoa(struct.pack('!I', ntohl(key.value)))  # Add ntohl()
+
             current_count = value.value
             logging.info(f"Current count for {src_ip}: {current_count}")
 
@@ -215,6 +219,10 @@ def main():
                if p['packet_type'] == 0:
                    logging.info(f"  Seq Num: {p['seq_num']}, Ack Num: {p['ack_num']}")
                    logging.info(f"  TCP Flags: {p['tcp_flags']}")
+
+               logging.info("\n[HTTP Data]")
+               logging.info(f"HTTP Data Length: {p['http_data_len']}")
+               logging.info(f"HTTP Content:{p['http_data']}")
                logging.info("---")
 
            deltas = analyzer.get_packet_deltas()
@@ -235,7 +243,7 @@ def main():
                except requests.exceptions.RequestException as e:
                    logging.error(f"Error connecting to dashboard API: {e}")
 
-           time.sleep(50)
+           time.sleep(30)
    except KeyboardInterrupt:
        logging.info("Stopping packet analyzer daemon.")
    finally:
