@@ -10,6 +10,9 @@ import socket
 import struct
 import os
 import ctypes
+from socket import ntohl
+import ctypes as ct
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -54,6 +57,8 @@ class PacketAnalyzer:
                 ("seq_num", ctypes.c_uint32),
                 ("ack_num", ctypes.c_uint32),
                 ("tcp_flags", ctypes.c_uint8),
+                ("http_data", ct.c_char * 256),  # MAX_HTTP_DATA = 256
+                ("http_data_len", ct.c_uint32)
             ]
 
         self.PacketInfo = PacketInfo
@@ -78,6 +83,8 @@ class PacketAnalyzer:
         # Attach the event type to the perf buffer
         self.bpf["packet_events"].event_type = self.PacketInfo
 
+
+
     def attach(self):
         function_name = str(self.function_name)
         fn = self.bpf.load_func(function_name, BPF.XDP)
@@ -90,15 +97,17 @@ class PacketAnalyzer:
             try:
                 event = ctypes.cast(data, ctypes.POINTER(self.PacketInfo)).contents
                 print("=== Full TCP/IP Packet ===")
-                
+
                 # Ethernet
                 print("\n[Ethernet Header]")
                 print(f"Packet Length: {event.packet_len} bytes")
 
                 # IP 
                 print("\n[IP Header]")
-                print(f"Source IP: {socket.inet_ntoa(struct.pack('!I', event.src_ip))}")
-                print(f"Dest IP: {socket.inet_ntoa(struct.pack('!I', event.dst_ip))}")
+                src_ip = socket.inet_ntoa(struct.pack('!I', ntohl(event.src_ip)))  # Add ntohl()
+                dst_ip = socket.inet_ntoa(struct.pack('!I', ntohl(event.dst_ip)))
+                print(f"Source IP: {src_ip}")
+                print(f"Dest IP: {dst_ip}")
                 print(f"Protocol: {event.protocol}")
 
                 # TCP
@@ -109,15 +118,12 @@ class PacketAnalyzer:
                 print(f"Ack Number: {event.ack_num}")
                 print(f"TCP Flags: {event.tcp_flags:08b}")
 
-                # Payload
-                print("\n[Payload]")
-                if hasattr(event, 'http_data'):
-                    print(f"HTTP Data: {event.http_data}")
-                else:
-                    print("Raw data not captured")
-                
-                src_ip = socket.inet_ntoa(struct.pack("!I", event.src_ip))
-                dst_ip = socket.inet_ntoa(struct.pack("!I", event.dst_ip))
+
+                if event.http_data_len > 0:
+                    http_data = event.http_data[:event.http_data_len].decode('utf-8', 'ignore')
+                    print("\n[HTTP Data]")
+                    print(f"HTTP Data Length: {event.http_data_len}")
+                    print(f"HTTP Content:\n{http_data}")
                 
                 protocol_names = {0: "TCP", 1: "UDP", 2: "ICMP"}
                 protocol_name = protocol_names.get(event.packet_type, "Unknown")
@@ -146,6 +152,7 @@ class PacketAnalyzer:
         """
         Compute packet count deltas since the last poll.
         """
+        
         deltas = {}
         for key, value in self.packet_count_map.items():
             src_ip = socket.inet_ntoa(struct.pack("!I", key.value))
@@ -173,13 +180,24 @@ class PacketAnalyzer:
     def cleanup(self):
         self.bpf.remove_xdp(self.interface, 0)
         self.bpf.cleanup()
-
+    def print_trace_log(self):
+        try:
+            trace_pipe = open("/sys/kernel/debug/tracing/trace_pipe", "rb")
+            while True:
+                line = trace_pipe.readline()
+                if line:
+                    print(f"[TRACE] {line.decode('utf-8', errors='ignore').strip()}")
+        except KeyboardInterrupt:
+            trace_pipe.close()
 
 def main():
    analyzer = PacketAnalyzer()
    analyzer.attach()
    api_url = config["dashboard_api_url"]
-
+   
+   from threading import Thread
+   trace_thread = Thread(target=analyzer.print_trace_log, daemon=True)
+   trace_thread.start()
    try:
        while True:
            clear_terminal()
@@ -189,8 +207,10 @@ def main():
                p = analyzer.latest_packet
                logging.info("Packet Details:")
                logging.info(f"  Protocol: {p['protocol']}")
-               logging.info(f"  Source: {p['src_ip']}:{p['src_port']}")
-               logging.info(f"  Destination: {p['dst_ip']}:{p['dst_port']}")
+               logging.info(f"  Source IP: {p['src_ip']}")
+               logging.info(f"  Destination IP: {p['dst_ip']}")
+               logging.info(f"  Source Port: {p['src_port']}")
+               logging.info(f"  Destination Port: {p['dst_port']}")
                logging.info(f"  Packet Length: {p['packet_len']} bytes")
                if p['packet_type'] == 0:
                    logging.info(f"  Seq Num: {p['seq_num']}, Ack Num: {p['ack_num']}")
@@ -215,7 +235,7 @@ def main():
                except requests.exceptions.RequestException as e:
                    logging.error(f"Error connecting to dashboard API: {e}")
 
-           time.sleep(10)
+           time.sleep(50)
    except KeyboardInterrupt:
        logging.info("Stopping packet analyzer daemon.")
    finally:
