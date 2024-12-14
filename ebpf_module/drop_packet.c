@@ -32,7 +32,7 @@ BPF_PERCPU_ARRAY(sample_counter, __u64, 1);
 // Perf buffer to send packet details to userspace
 BPF_PERF_OUTPUT(packet_events);
 
-BPF_PERCPU_ARRAY(tmp_packet, struct packet_info, 1);
+BPF_PERCPU_ARRAY(tmp_packet, struct packet_info, 1); // an array per cpu named tmp_packet storing 1 packet_info
 
 
 int count_tcp_packets(struct xdp_md *ctx) {
@@ -42,7 +42,7 @@ int count_tcp_packets(struct xdp_md *ctx) {
 
     // Packet info structure (stack memory)
     int zero = 0;
-    struct packet_info *info = tmp_packet.lookup(&zero);
+    struct packet_info *info = tmp_packet.lookup(&zero); //lookup 
     if (!info)
         return XDP_PASS;
     info->packet_len = data_end - data;

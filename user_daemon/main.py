@@ -92,7 +92,7 @@ class PacketAnalyzer:
         self.packet_count_map = self.bpf.get_table("packet_count")
 
 
-        # Set up perf buffer callback
+        # Set up perf buffer callback and attach it to perf buffer ==> everytime kernel pushes data to the buffer "packet_events", the function is called
         def print_packet_event(cpu, data, size):
             try:
                 event = ctypes.cast(data, ctypes.POINTER(self.PacketInfo)).contents
