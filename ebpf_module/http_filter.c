@@ -6,7 +6,7 @@
 #include <uapi/linux/in.h>
 #include <bcc/proto.h>
 
-#define MAX_HTTP_DATA 256
+#define MAX_HTTP_DATA 2048
 // Define a structure to hold detailed packet information
 struct packet_info {
     __u32 src_ip;     // Source IP address
@@ -83,11 +83,13 @@ int count_tcp_packets(struct xdp_md *ctx) {
         info->tcp_flags = ((tcp->fin & 0x1) | ((tcp->syn & 0x1) << 1) |
                           ((tcp->rst & 0x1) << 2) | ((tcp->psh & 0x1) << 3) |
                           ((tcp->ack & 0x1) << 4) | ((tcp->urg & 0x1) << 5));
+        void *http_data = (void *)tcp + (tcp->doff * 4);
 
         // **ACK Packet Filtering**
         // Skip pure ACK packets (no SYN, FIN, PSH, RST, URG flags set)
         if (tcp->ack == 1 && tcp->syn == 0 && tcp->fin == 0 &&
-            tcp->psh == 0 && tcp->rst == 0 && tcp->urg == 0) {
+            tcp->psh == 0 && tcp->rst == 0 && tcp->urg == 0 &&
+            data_end - http_data == 0) {
             return XDP_PASS;
         }
 
@@ -105,7 +107,6 @@ int count_tcp_packets(struct xdp_md *ctx) {
         __u64 *counter = sample_counter.lookup(&index);
             // Log the first part of the TCP packet details
 
-        void *http_data = (void *)tcp + (tcp->doff * 4);
 
         bpf_trace_printk("SRC IP1: %u",
             (info->src_ip));

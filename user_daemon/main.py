@@ -57,7 +57,7 @@ class PacketAnalyzer:
                 ("seq_num", ctypes.c_uint32),
                 ("ack_num", ctypes.c_uint32),
                 ("tcp_flags", ctypes.c_uint8),
-                ("http_data", ct.c_char * 256),  # MAX_HTTP_DATA = 256
+                ("http_data", ct.c_char * 2048),  # MAX_HTTP_DATA = 256
                 ("http_data_len", ct.c_uint32)
             ]
 
@@ -243,7 +243,7 @@ def main():
                except requests.exceptions.RequestException as e:
                    logging.error(f"Error connecting to dashboard API: {e}")
 
-           time.sleep(30)
+           time.sleep(100)
    except KeyboardInterrupt:
        logging.info("Stopping packet analyzer daemon.")
    finally:
