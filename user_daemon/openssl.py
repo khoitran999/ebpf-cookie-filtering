@@ -179,12 +179,12 @@ static int SSL_exit(struct pt_regs *ctx, int rw) {
         bpf_get_current_comm(&data->comm, sizeof(data->comm));
 
         if (bufp != 0)
-                ret = bpf_probe_read_user(&data->buf, buf_copy_size, (char *)*bufp);
+                ret = bpf_probe_read_user(&data->buf, buf_copy_size, (char *)*bufp); //copying
 
         bufs.delete(&tid);
         start_ns.delete(&tid);
 
-        if (!ret)
+        if (!ret) //if it's filled
                 data->buf_filled = 1;
         else
                 buf_copy_size = 0;
@@ -282,6 +282,8 @@ b = BPF(text=prog)
 # need to stash the buffer address in a map on the function entry and read it
 # on its exit (Mark Drayton)
 #
+
+#attach uprobe "probe_SSL_rw_enter" to the symbol SSL_write of the library lib
 def attach_openssl(lib):
     b.attach_uprobe(name=lib, sym="SSL_write",
                     fn_name="probe_SSL_rw_enter", pid=args.pid or -1)
@@ -340,7 +342,7 @@ if args.gnutls:
 if args.nss:
     attach_nss("nspr4")
 
-
+# if there are extra libraries you want to look at that's not openssl or gnutls
 if args.extra_lib:
     for lib_type, lib_path in args.extra_lib:
         LIB_TRACERS[lib_type](lib_path)
@@ -369,7 +371,8 @@ def print_event_handshake(cpu, data, size):
 
 def print_event(cpu, data, size, evt):
     global start
-    event = b[evt].event(data)
+    event = b[evt].event(data) 
+    #evt is "perf_SSL_rw" for the perf buffer or "perf_SSL_do_handshake" perf buffer
     if event.len <= args.max_buffer_size:
         buf_size = event.len
     else:
@@ -386,6 +389,7 @@ def print_event(cpu, data, size, evt):
         if not args.comm == event.comm.decode('utf-8', 'replace'):
             return
 
+    #                 formatting prints
     if start == 0:
         start = event.timestamp_ns
     time_s = (float(event.timestamp_ns - start)) / 1000000000
@@ -409,6 +413,7 @@ def print_event(cpu, data, size, evt):
     if args.latency:
         base_fmt += " %(lat)-7s"
 
+    #????
     fmt = ''.join([base_fmt, "\n%(begin)s\n%(data)s\n%(end)s\n\n"])
     if args.hexdump:
         unwrapped_data = binascii.hexlify(buf)
