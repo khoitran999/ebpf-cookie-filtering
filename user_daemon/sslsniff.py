@@ -122,6 +122,36 @@ BPF_PERF_OUTPUT(perf_SSL_rw);
 BPF_HASH(start_ns, u32);
 BPF_HASH(bufs, u32, u64);
 
+
+                                    // CIPHER
+struct cipher_data_t {
+        u8 buf[5]; //buffer to store copy of data
+};
+BPF_PERCPU_ARRAY(cipher_data, struct cipher_data_t, 1);
+BPF_PERF_OUTPUT(perf_cipher);
+int probe_cipher_enter(struct pt_regs *ctx, void *ci) {
+    u32 zero = 0;
+    struct cipher_data_t *data = cipher_data.lookup(&zero);
+    const char * cipher = (const char *)PT_REGS_RC(ctx);
+
+    int ret;
+
+    if (data != NULL && cipher != NULL) { // Check for null pointers
+        ret = bpf_probe_read_user(&data->buf, sizeof(data->buf), cipher); // Copying
+    }
+
+    if (ret < 0) {
+        // Handle the read error if necessary
+        return 0; // Early exit if reading user memory failed
+    }
+
+    // Submit the data to user space
+    perf_cipher.perf_submit(ctx, data, sizeof(*data));
+    return 0;
+}
+
+
+
 int probe_SSL_rw_enter(struct pt_regs *ctx, void *ssl, void *buf, int num) {
         int ret;
         u32 zero = 0;
@@ -259,6 +289,80 @@ int probe_SSL_do_handshake_exit(struct pt_regs *ctx) {
 }
 """
 
+'''
+prog_test = """
+#include <linux/ptrace.h>
+#include <linux/sched.h>  
+                                    // CIPHER
+struct cipher_data_t {
+        u8 buf[5]; //buffer to store copy of data
+};
+BPF_PERCPU_ARRAY(cipher_data, struct cipher_data_t, 1);
+BPF_PERF_OUTPUT(perf_cipher);
+int probe_cipher_enter(struct pt_regs *ctx, void *ci) {
+    u32 zero = 0;
+    struct cipher_data_t *data = cipher_data.lookup(&zero);
+    const char * cipher = (const char *)PT_REGS_RC(ctx);
+
+    int ret;
+
+    if (data != NULL && cipher != NULL) { // Check for null pointers
+        ret = bpf_probe_read_user(&data->buf, sizeof(data->buf), cipher); // Copying
+    }
+
+    if (ret < 0) {
+        // Handle the read error if necessary
+        return 0; // Early exit if reading user memory failed
+    }
+
+    // Submit the data to user space
+    perf_cipher.perf_submit(ctx, data, sizeof(struct cipher_data_t));
+    return 0;
+}
+
+
+"""
+'''
+
+prog_test = """
+
+#include <linux/ptrace.h>
+#include <linux/sched.h>  
+                                    
+#define MAX_BUF_SIZE 8000
+
+struct cipher_data_t {
+    u8 buf[MAX_BUF_SIZE]; //buffer to store copy of data
+};
+
+#define BASE_EVENT_SIZE ((size_t)(&((struct cipher_data_t*)0)->buf))
+
+//by adding the size of buf, you get the entire struct size
+#define EVENT_SIZE(X) (BASE_EVENT_SIZE + ((size_t)(X)))
+
+BPF_PERCPU_ARRAY(cipher_data, struct cipher_data_t, 1);
+BPF_PERF_OUTPUT(perf_cipher);
+
+int probe_cipher(struct pt_regs *ctx) {
+    u32 zero = 0;
+    int ret;
+
+    struct cipher_data_t *data = cipher_data.lookup(&zero);
+    if (!data)
+                return 0;
+    
+    const char * cipher = (const char *)PT_REGS_RC(ctx);
+    ret = bpf_probe_read_user(&data->buf, sizeof(data->buf), cipher); // Copying
+    if (ret < 0) {
+        return 0; // Early exit if reading user memory failed
+    }
+
+    perf_cipher.perf_submit(ctx, data, EVENT_SIZE((size_t) MAX_BUF_SIZE));
+    return 0;
+}
+"""
+
+
 if args.pid:
     prog = prog.replace('PID_FILTER', 'if (pid != %d) { return 0; }' % args.pid)
 else:
@@ -278,6 +382,7 @@ if args.debug or args.ebpf:
 
 
 b = BPF(text=prog)
+# b = BPF(text=prog_test)
 
 # It looks like SSL_read's arguments aren't available in a return probe so you
 # need to stash the buffer address in a map on the function entry and read it
@@ -286,6 +391,15 @@ b = BPF(text=prog)
 
 #attach uprobe "probe_SSL_rw_enter" to the symbol SSL_write of the library lib
 def attach_openssl(lib):
+    # b.attach_uprobe(name=lib, sym="tls13_derive_iv",
+    #                 fn_name="probe_tls13_derive_iv")
+
+    # b.attach_uprobe(name=lib, sym="SSL_get_current_cipher",
+    #                 fn_name="probe_cipher_enter", pid=args.pid or -1)
+    # b.attach_uretprobe(name=lib, sym="SSL_CIPHER_get_name",
+    #                 fn_name="probe_cipher", pid=args.pid or -1)
+    
+
     b.attach_uprobe(name=lib, sym="SSL_write",
                     fn_name="probe_SSL_rw_enter", pid=args.pid or -1)
     b.attach_uretprobe(name=lib, sym="SSL_write",
@@ -294,11 +408,11 @@ def attach_openssl(lib):
                     fn_name="probe_SSL_rw_enter", pid=args.pid or -1)
     b.attach_uretprobe(name=lib, sym="SSL_read",
                        fn_name="probe_SSL_read_exit", pid=args.pid or -1)
-    if args.latency and args.handshake:
-        b.attach_uprobe(name="ssl", sym="SSL_do_handshake",
-                        fn_name="probe_SSL_do_handshake_enter", pid=args.pid or -1)
-        b.attach_uretprobe(name="ssl", sym="SSL_do_handshake",
-                           fn_name="probe_SSL_do_handshake_exit", pid=args.pid or -1)
+    # if args.latency and args.handshake:
+    #     b.attach_uprobe(name="ssl", sym="SSL_do_handshake",
+    #                     fn_name="probe_SSL_do_handshake_enter", pid=args.pid or -1)
+    #     b.attach_uretprobe(name="ssl", sym="SSL_do_handshake",
+    #                        fn_name="probe_SSL_do_handshake_exit", pid=args.pid or -1)
 
 def attach_gnutls(lib):
     b.attach_uprobe(name=lib, sym="gnutls_record_send",
@@ -338,10 +452,12 @@ LIB_TRACERS = {
 
 if args.openssl:
     attach_openssl("ssl")
-if args.gnutls:
-    attach_gnutls("gnutls")
-if args.nss:
-    attach_nss("nspr4")
+    print("attaching ssl")
+# if args.gnutls:
+#     attach_gnutls("gnutls")
+#     print("attaching tls")
+# if args.nss:
+#     attach_nss("nspr4")
 
 # if there are extra libraries you want to look at that's not openssl or gnutls
 if args.extra_lib:
@@ -365,6 +481,17 @@ with open("output.txt", "w") as file:
     file.write(header)
 # process event
     start = 0
+
+    def print_event_tls(cpu, data, size):
+        event = b["perf_tls"].event(data) 
+        print(event.vi)
+
+    def print_event_cipher(cpu, data, size):
+        event = b["perf_cipher"].event(data) 
+        buf = bytearray(event.buf[:8000])
+        cypher_name = buf.decode('utf-8', 'replace')
+        print(cypher_name)
+
 
     def print_event_rw(cpu, data, size):
         print_event(cpu, data, size, "perf_SSL_rw")
@@ -453,7 +580,9 @@ with open("output.txt", "w") as file:
             file.write(fmt % fmt_data)
 
     b["perf_SSL_rw"].open_perf_buffer(print_event_rw)
-    b["perf_SSL_do_handshake"].open_perf_buffer(print_event_handshake)
+    # b["perf_SSL_do_handshake"].open_perf_buffer(print_event_handshake)
+    # b["perf_tls"].open_perf_buffer(print_event_tls)
+    # b["perf_cipher"].open_perf_buffer(print_event_cipher)
     while 1:
         try:
             b.perf_buffer_poll()
